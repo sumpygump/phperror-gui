@@ -15,64 +15,24 @@
 /**
  * @var string|null Path to error log file or null to get from ini settings
  */
-$error_log = null;
+$error_log = 'error.log';
+
 /**
  * @var string|null Path to log cache - must be writable - null for no cache
  */
-$cache     = null;
+$cache = null;
+
 /**
  * @var array Array of log lines
  */
 $logs = [];
+
 /**
  * @var array Array of log types
  */
 $types = [];
 
-/**
- * https://gist.github.com/amnuts/8633684
- */
-function osort(&$array, $properties)
-{
-    if (is_string($properties)) {
-        $properties = array($properties => SORT_ASC);
-    }
-    uasort($array, function ($a, $b) use ($properties) {
-        foreach ($properties as $k => $v) {
-            if (is_int($k)) {
-                $k = $v;
-                $v = SORT_ASC;
-            }
-            $collapse = function ($node, $props) {
-                if (is_array($props)) {
-                    foreach ($props as $prop) {
-                        $node = (!isset($node->$prop)) ? null : $node->$prop;
-                    }
-                    return $node;
-                } else {
-                    return (!isset($node->$props)) ? null : $node->$props;
-                }
-            };
-            $aProp = $collapse($a, $k);
-            $bProp = $collapse($b, $k);
-            if ($aProp != $bProp) {
-                return ($v == SORT_ASC)
-                ? strnatcasecmp($aProp, $bProp)
-                : strnatcasecmp($bProp, $aProp);
-            }
-        }
-        return 0;
-    });
-}
-
-function pretty_message($message)
-{
-    $tpl_message = '<div style="margin: 20px auto; width: 400px; background-color: #eeeeee; padding: 20px;">
-        <div>{{message}}</div>
-    </div>';
-
-    print(str_replace('{{message}}', $message, $tpl_message));
-}
+$format = isset($_GET['format']) ? $_GET['format'] : 'table';
 
 class ErrorLog
 {
@@ -81,13 +41,13 @@ class ErrorLog
     const REGEX_TRACE_TYPE_A = '!^\[(?P<time>[^\]]*)\] PHP\s+(?P<msg>\d+\. .*)$!';
     const REGEX_TRACE_TYPE_B = '!^(?P<msg>#\d+ .*)$!';
 
-    private $log;
+    private $logfile;
     private $types = [];
     private $typecount = [];
 
-    public function __construct(SplFileObject $log)
+    public function __construct(SplFileObject $logfile)
     {
-        $this->log = $log;
+        $this->logfile = $logfile;
     }
 
     public function getTypes()
@@ -102,13 +62,13 @@ class ErrorLog
 
     public function parse()
     {
-        $log = $this->log;
+        $log = $this->logfile;
         $logs = [];
 
-        $prevError = new stdClass;
+        $errorObject = new stdClass;
         while (!$log->eof()) {
-            $this->captureStackTrace($log, $prevError);
-            $this->captureAnyAdditionalText($log, $prevError);
+            $this->captureStackTrace($log, $errorObject);
+            $this->captureAnyAdditionalText($log, $errorObject);
 
             $parts = [];
             if (preg_match(self::REGEX_ERROR_LINE, $log->current(), $parts)) {
@@ -120,7 +80,7 @@ class ErrorLog
                 } else {
                     $this->updateEntry($logs[$msg], $parts['time']);
                 }
-                $prevError = &$logs[$msg];
+                $errorObject = &$logs[$msg];
             }
             $log->next();
         }
@@ -191,7 +151,7 @@ class ErrorLog
         return $code;
     }
 
-    public function captureStackTrace($log, $prevError)
+    public function captureStackTrace($log, $errorObject)
     {
         if (preg_match(self::REGEX_TRACE_LINE, $log->current())) {
             $stackTrace = $parts = [];
@@ -209,11 +169,11 @@ class ErrorLog
             //    $stackTrace[] = $log->current();
             //    $log->next();
             //}
-            $prevError->trace = join("\n", $stackTrace);
+            $errorObject->trace = join("\n", $stackTrace);
         }
     }
 
-    public function captureAnyAdditionalText($log, $prevError)
+    public function captureAnyAdditionalText($log, $errorObject)
     {
         $more = [];
 
@@ -223,7 +183,7 @@ class ErrorLog
         }
 
         if (!empty($more)) {
-            $prevError->more = join("\n", $more);
+            $errorObject->more = join("\n", $more);
         }
     }
 
@@ -257,12 +217,62 @@ class ErrorLog
     }
 }
 
+class ErrorLogUtilities
+{
+    /**
+     * https://gist.github.com/amnuts/8633684
+     */
+    public static function osort(&$array, $properties)
+    {
+        if (is_string($properties)) {
+            $properties = array($properties => SORT_ASC);
+        }
+        uasort($array, function ($a, $b) use ($properties) {
+            foreach ($properties as $k => $v) {
+                if (is_int($k)) {
+                    $k = $v;
+                    $v = SORT_ASC;
+                }
+                $collapse = function ($node, $props) {
+                    if (is_array($props)) {
+                        foreach ($props as $prop) {
+                            $node = (!isset($node->$prop)) ? null : $node->$prop;
+                        }
+                        return $node;
+                    } else {
+                        return (!isset($node->$props)) ? null : $node->$props;
+                    }
+                };
+                $aProp = $collapse($a, $k);
+                $bProp = $collapse($b, $k);
+                if ($aProp != $bProp) {
+                    return ($v == SORT_ASC)
+                    ? strnatcasecmp($aProp, $bProp)
+                    : strnatcasecmp($bProp, $aProp);
+                }
+            }
+            return 0;
+        });
+    }
+
+    public static function pretty_message($message)
+    {
+        $tpl_message = '<div style="margin: 20px auto; width: 400px; background-color: #eeeeee; padding: 20px;">
+            <div>{{message}}</div>
+        </div>';
+
+        print(str_replace('{{message}}', $message, $tpl_message));
+    }
+}
+
 if ($error_log === null) {
     $error_log = ini_get('error_log');
 }
 
 if (empty($error_log)) {
-    pretty_message('No error log was defined or could be determined from the ini settings.');
+    ErrorLogUtilities::pretty_message(
+        'No error log was defined or could be determined from the ini settings.'
+    );
     die();
 }
 
@@ -270,7 +280,7 @@ try {
     $log = new SplFileObject($error_log);
     $log->setFlags(SplFileObject::DROP_NEW_LINE);
 } catch (RuntimeException $e) {
-    pretty_message("The file '{$error_log}' cannot be opened for reading.");
+    ErrorLogUtilities::pretty_message("The file '{$error_log}' cannot be opened for reading.");
     die();
 }
 
@@ -285,7 +295,6 @@ $logs = $errorlog->parse();
 $types = $errorlog->getTypes();
 $typecount = $errorlog->getTypeCounts();
 
-
 if ($cache !== null) {
     $cacheData = serialize(['seek' => $log->getSize(), 'logs' => $logs, 'types' => $types, 'typecount' => $typecount]);
     file_put_contents($cache, $cacheData);
@@ -293,7 +302,7 @@ if ($cache !== null) {
 
 $log = null;
 
-osort($logs, ['last' => SORT_DESC]);
+ErrorLogUtilities::osort($logs, ['last' => SORT_DESC]);
 $total = count($logs);
 ksort($types);
 
@@ -311,14 +320,12 @@ $host = (function_exists('gethostname')
 <head>
     <meta charset="UTF-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta http-equiv="cleartype" content="on">
-    <meta name="HandheldFriendly" content="True">
-    <meta name="MobileOptimized" content="320">
     <meta name="generator" content="https://github.com/amnuts/phperror-gui" />
     <title>PHP error log on <?php echo htmlentities($host); ?></title>
+    <link href="https://fonts.googleapis.com/css?family=Roboto" rel="stylesheet">
     <script src="//code.jquery.com/jquery-2.2.1.min.js" type="text/javascript"></script>
     <style type="text/css">
-        body { font-family: Arial, Helvetica, sans-serif; font-size: 13px; margin: 0; padding: 0; overflow-y: scroll; background-color: #ffffff; }
+        body { font-family: 'Roboto', sans-serif; font-size: 13px; margin: 0; padding: 0; overflow-y: scroll; background-color: #ffffff; }
         article { width: 100%; display: block; margin: 0 0 1em 0; background-color: #ffffff; }
         article > div { border-left: 1px solid #000000; border-left-width: 10px; padding: 1em; -webkit-box-shadow: 1px 1px 5px 0px rgba(0,0,0,0.45); -moz-box-shadow: 1px 1px 5px 0px rgba(0,0,0,0.45); box-shadow: 1px 1px 5px 0px rgba(0,0,0,0.45); }
         article > div > b { font-weight: bold; display: block; }
@@ -347,14 +354,14 @@ $host = (function_exists('gethostname')
         footer a:hover { opacity: 1; }
         .title { font-weight: bold; }
         .header { background-color: #6f7f59; color: #ffffff; padding: 12px 0; }
-        .contain { margin: 0 auto; max-width: 880px; }
+        .contain { margin: 0 auto; max-width: 880px; padding: 0 16px; }
         .controls-wrapper { background-color: #ffffff; padding: 6px 0; border-bottom: 1px solid #d3d3d3; }
         .controls { margin: 0; display:flex; justify-content: flex-start; flex-wrap: wrap; }
         .controls fieldset { padding: 0; border: 0; margin: 0 12px 6px 0; }
         .controls .label { text-transform: uppercase; padding: 4px 0; color: #4a4a4a; }
         .controls .control { line-height: 1.1; }
         #typeFilter input { vertical-align: middle; margin: 0; margin-top: -1px; }
-        #typeFilter label { display: inline-block; border-bottom: 4px solid #000000; margin-right: 6px; padding-bottom: 5px; color: #4a4a4a; }
+        #typeFilter label { display: inline-block; border-bottom: 4px solid #000000; margin: 0 6px 6px 0; padding-bottom: 5px; color: #4a4a4a; }
         #pathFilter input { min-width: 100px; font-size: 100%; display: inline-block; padding: 3px; border: 1px solid #d3d3d3; line-height: 1.3; }
         #sortOptions a { padding: 4px 8px; border: 1px solid #d3d3d3; border-radius: 0; color: #4a4a4a; display: inline-block; text-decoration: none; background-color: #fff; background-image: -webkit-linear-gradient(top,rgba(0,0,0,0),rgba(0,0,0,0.02)); background-image: linear-gradient(top,rgba(0,0,0,0),rgba(0,0,0,0.02)); margin-right: -5px; }
         #sortOptions a:first-child { border-top-left-radius: 4px; border-bottom-left-radius: 4px; }
@@ -363,8 +370,14 @@ $host = (function_exists('gethostname')
         #sortOptions a.is-active { border-bottom-color: #3367d6; -webkit-box-shadow: inset 0 -1px 0 #3367d6; box-shadow: inset 0 -1px 0 #3367d6; }
         #sortOptions a span { display: inline-block; }
         .count-message { padding: 6px 0; color: #4a4a4a; }
-        .errors-wrapper { background-color: #efefef; padding-bottom: 1rem; }
+        .errors-wrapper { padding-bottom: 1rem; }
         .zero-state { padding: 3rem 0; }
+
+        .error-table { width: 100%; }
+        .error-table td { padding: 2px; border-bottom: 1px solid #d3d3d3; border-bottom-color: #d3d3d3 !important;}
+        .error-table th { padding: 2px; text-align: left; font-weight: normal; color: #333; border-bottom: 1px solid #d3d3d3; }
+        .error-table td.entry-type { border-left: 4px solid #000000; padding-left: 10px; }
+        .error-table td.r { text-align: right; padding-right: 10px; }
         .hide { display: none; }
         .alternate { background-color: #f8f8f8; }
         .deprecated { border-color: #acacac !important; }
@@ -432,8 +445,37 @@ $host = (function_exists('gethostname')
     <div id="entryCount" class="count-message"><?php echo $total; ?> distinct entr<?php echo($total == 1 ? 'y' : 'ies'); ?></div>
 
     <section id="errorList">
+    <?php if ($format == 'table') { ?>
+        <div style="overflow-x:scroll;">
+        <table class="error-table" cellpadding="0" cellspacing="0">
+            <thead>
+                <tr><th>Type</th><th class="r">Hits</th><th>Error</th><th>Last Seen</th></tr>
+            </thead>
+            <tbody class="js-error-entries">
+            <?php foreach ($logs as $log) { ?>
+                <tr class="entry <?= $types[$log->type] ?>"
+                    data-path="<?php if (!empty($log->path)) echo htmlentities($log->path); ?>"
+                    data-line="<?php if (!empty($log->line)) echo $log->line; ?>"
+                    data-type="<?php echo $types[$log->type]; ?>"
+                    data-hits="<?php echo $log->hits; ?>"
+                    data-last="<?php echo $log->last; ?>">
+                    <td class="entry-type <?=$types[$log->type]?>"><?= htmlentities($log->type) ?></td>
+                    <td class="r"><?= $log->hits ?></td>
+                    <td><strong><?= htmlentities((empty($log->core) ? $log->msg : $log->core)); ?></strong><br />
+                        <?php if (!empty($log->path)) {
+                            echo htmlentities($log->path) . ", line " . $log->line;
+                        } ?>
+                    </td>
+                    <td><?php echo date_format(date_create("@{$log->first}"), "Y-m-d H:i:s"); ?></td>
+                </tr>
+            <?php } // end foreach ?>
+            </tbody>
+        </table>
+        </div>
+    <?php } else { ?>
+        <div class="js-error-entries">
     <?php foreach ($logs as $log): ?>
-        <article class="<?php echo $types[$log->type]; ?>"
+        <article class="entry <?php echo $types[$log->type]; ?>"
                 data-path="<?php if (!empty($log->path)) echo htmlentities($log->path); ?>"
                 data-line="<?php if (!empty($log->line)) echo $log->line; ?>"
                 data-type="<?php echo $types[$log->type]; ?>"
@@ -463,6 +505,8 @@ $host = (function_exists('gethostname')
             </div>
         </article>
     <?php endforeach; ?>
+        </div>
+    <?php } //endif ?>
     </section>
 
     <p id="nothingToShow" class="zero-state hide">Nothing to show with your selected filtering.</p>
@@ -511,13 +555,13 @@ $host = (function_exists('gethostname')
     }
 
     function stripe() {
-        var errors = $('#errorList').find('article');
+        var errors = $('#errorList').find('.entry');
         errors.removeClass('alternate');
         errors.filter(':not(.hide):odd').addClass('alternate');
     }
 
     function visible() {
-        var vis = $('#errorList').find('article').filter(':not(.hide)');
+        var vis = $('#errorList').find('.entry').filter(':not(.hide)');
         var len = vis.length;
         if (len == 0) {
             $('#nothingToShow').removeClass('hide');
@@ -547,7 +591,7 @@ $host = (function_exists('gethostname')
             return $(this).val();
         }).get();
         var input = $('#pathFilter').find('input').val();
-        $('article').each(function(){
+        $('.entry').each(function(){
             var a = $(this);
             var found = a.data('path').toLowerCase().indexOf(input.toLowerCase());
             if ((input.length && found == -1) || (jQuery.inArray(a.data('type'), checked) == -1)) {
@@ -574,7 +618,7 @@ $host = (function_exists('gethostname')
     }
 
     function sortEntries(type, order) {
-        var aList = $('#errorList').find('article');
+        var aList = $('#errorList').find('.entry');
         aList.sort(function(a, b){
             if (!isNaN($(a).data(type))) {
                 var entryA = parseInt($(a).data(type));
@@ -588,7 +632,7 @@ $host = (function_exists('gethostname')
             }
             return  (entryB < entryA) ? -1 : (entryB > entryA) ? 1 : 0;
         });
-        $('section').html(aList);
+        $('.js-error-entries').html(aList);
     }
 
     $(function(){
