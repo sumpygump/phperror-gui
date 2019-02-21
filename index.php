@@ -31,7 +31,15 @@ $logs = [];
  */
 $types = [];
 
+/**
+ * @var string Format of error log
+ */
 $format = isset($_GET['format']) ? $_GET['format'] : 'table';
+
+/**
+ * @var string Heading in banner
+ */
+$heading = "PHPError GUI";
 
 class ErrorLog
 {
@@ -330,11 +338,12 @@ $host = (function_exists('gethostname')
     <meta charset="UTF-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="generator" content="https://github.com/amnuts/phperror-gui" />
-    <title>PHP error log on <?php echo htmlentities($host); ?></title>
+    <title>PHP error log on <?= htmlentities($host); ?></title>
     <link href="https://fonts.googleapis.com/css?family=Roboto" rel="stylesheet">
     <script src="//code.jquery.com/jquery-2.2.1.min.js" type="text/javascript"></script>
     <style type="text/css">
         body { font-family: 'Roboto', sans-serif; font-size: 13px; margin: 0; padding: 0; overflow-y: scroll; background-color: #ffffff; }
+        .server-details .label { text-transform: uppercase; padding: 4px 0; color: #ffffff; font-size: 10px; font-weight: bold; }
         article { width: 100%; display: block; margin: 0 0 1em 0; background-color: #ffffff; }
         article > div { border-left: 1px solid #000000; border-left-width: 10px; padding: 1em; -webkit-box-shadow: 1px 1px 5px 0px rgba(0,0,0,0.45); -moz-box-shadow: 1px 1px 5px 0px rgba(0,0,0,0.45); box-shadow: 1px 1px 5px 0px rgba(0,0,0,0.45); }
         article > div > b { font-weight: bold; display: block; }
@@ -411,11 +420,13 @@ $host = (function_exists('gethostname')
 
 <div class="header">
     <div class="contain">
-        <span class="title">PHPError GUI</span> &bull;
+        <span class="title"><?= $heading ?></span> &bull;
         <span class="server-details">
-            Error log '<?php echo htmlentities($error_log); ?>'
-            on <?php echo htmlentities($host); ?> (PHP <?php echo phpversion(); ?>,
-            <?php echo htmlentities($_SERVER['SERVER_SOFTWARE']); ?>)
+            <span class="label">File:</span> '<?php echo htmlentities($error_log); ?>' |
+            <span class="label">Host:</span> <?= htmlentities($host); ?> |
+            <span class="label">Software:</span> PHP <?= PHP_VERSION; ?>,
+            <?= htmlentities($_SERVER['SERVER_SOFTWARE']); ?> |
+            <span class="label">Time:</span> <?= date('Y-m-d H:i:s'); ?>
         </span>
     </div>
 </div>
