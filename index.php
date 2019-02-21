@@ -1,5 +1,4 @@
 <?php
-
 /**
  * PHP Error Log GUI
  *
@@ -15,7 +14,7 @@
 /**
  * @var string|null Path to error log file or null to get from ini settings
  */
-$error_log = 'error.log';
+$error_log = null;
 
 /**
  * @var string|null Path to log cache - must be writable - null for no cache
@@ -42,8 +41,9 @@ class ErrorLog
     const REGEX_TRACE_TYPE_B = '!^(?P<msg>#\d+ .*)$!';
 
     private $logfile;
-    private $types = [];
-    private $typecount = [];
+    public $logs = [];
+    public $types = [];
+    public $typecounts = [];
 
     public function __construct(SplFileObject $logfile)
     {
@@ -57,13 +57,12 @@ class ErrorLog
 
     public function getTypeCounts()
     {
-        return $this->typecount;
+        return $this->typecounts;
     }
 
     public function parse()
     {
         $log = $this->logfile;
-        $logs = [];
 
         $errorObject = new stdClass;
         while (!$log->eof()) {
@@ -75,25 +74,31 @@ class ErrorLog
                 $type = $this->getErrorType($parts);
                 $msg = trim($parts['msg']);
 
-                if (!isset($logs[$msg])) {
-                    $logs[$msg] = $this->createEntry($type, $parts['time'], $msg);
+                if (!isset($this->logs[$msg])) {
+                    $this->logs[$msg] = $this->createEntry($type, $parts['time'], $msg);
                 } else {
-                    $this->updateEntry($logs[$msg], $parts['time']);
+                    $this->updateEntry($this->logs[$msg], $parts['time']);
                 }
-                $errorObject = &$logs[$msg];
+                $errorObject = &$this->logs[$msg];
             }
             $log->next();
         }
 
-        return $logs;
+        return $this->logs;
     }
 
     protected function createEntry($type, $time, $msg)
     {
+        if (false == date_create($time)) {
+            $timestamp = 0;
+        } else {
+            $timestamp = date_timestamp_get(date_create($time));
+        }
+
         $data = [
             'type'  => $type,
-            'first' => date_timestamp_get(date_create($time)),
-            'last'  => date_timestamp_get(date_create($time)),
+            'first' => $timestamp,
+            'last'  => $timestamp,
             'msg'   => $msg,
             'hits'  => 1,
             'trace' => null,
@@ -209,10 +214,10 @@ class ErrorLog
 
     public function increaseTypecount($type)
     {
-        if (!isset($this->typecount[$type])) {
-            $this->typecount[$type] = 1;
+        if (!isset($this->typecounts[$type])) {
+            $this->typecounts[$type] = 1;
         } else {
-            ++$this->typecount[$type];
+            ++$this->typecounts[$type];
         }
     }
 }
@@ -265,7 +270,7 @@ class ErrorLogUtilities
     }
 }
 
-if ($error_log === null) {
+if (!isset($error_log) || $error_log === null) {
     $error_log = ini_get('error_log');
 }
 
@@ -284,19 +289,23 @@ try {
     die();
 }
 
+$errorlog = new ErrorLog($log);
+
 if ($cache !== null && file_exists($cache)) {
     $cacheData = unserialize(file_get_contents($cache));
     extract($cacheData);
+    $errorlog->logs = $logs;
+    $errorlog->types = $types;
+    $errorlog->typecounts = $typecounts;
     $log->fseek($seek);
 }
 
-$errorlog = new ErrorLog($log);
 $logs = $errorlog->parse();
 $types = $errorlog->getTypes();
-$typecount = $errorlog->getTypeCounts();
+$typecounts = $errorlog->getTypeCounts();
 
 if ($cache !== null) {
-    $cacheData = serialize(['seek' => $log->getSize(), 'logs' => $logs, 'types' => $types, 'typecount' => $typecount]);
+    $cacheData = serialize(['seek' => $log->getSize(), 'logs' => $logs, 'types' => $types, 'typecounts' => $typecounts]);
     file_put_contents($cache, $cacheData);
 }
 
@@ -358,26 +367,33 @@ $host = (function_exists('gethostname')
         .controls-wrapper { background-color: #ffffff; padding: 6px 0; border-bottom: 1px solid #d3d3d3; }
         .controls { margin: 0; display:flex; justify-content: flex-start; flex-wrap: wrap; }
         .controls fieldset { padding: 0; border: 0; margin: 0 12px 6px 0; }
-        .controls .label { text-transform: uppercase; padding: 4px 0; color: #4a4a4a; }
+        .controls .label { text-transform: uppercase; padding: 4px 0; color: #4a4a4a; font-size: 10px; font-weight: bold; }
         .controls .control { line-height: 1.1; }
         #typeFilter input { vertical-align: middle; margin: 0; margin-top: -1px; }
         #typeFilter label { display: inline-block; border-bottom: 4px solid #000000; margin: 0 6px 6px 0; padding-bottom: 5px; color: #4a4a4a; }
-        #pathFilter input { min-width: 100px; font-size: 100%; display: inline-block; padding: 3px; border: 1px solid #d3d3d3; line-height: 1.3; }
-        #sortOptions a { padding: 4px 8px; border: 1px solid #d3d3d3; border-radius: 0; color: #4a4a4a; display: inline-block; text-decoration: none; background-color: #fff; background-image: -webkit-linear-gradient(top,rgba(0,0,0,0),rgba(0,0,0,0.02)); background-image: linear-gradient(top,rgba(0,0,0,0),rgba(0,0,0,0.02)); margin-right: -5px; }
-        #sortOptions a:first-child { border-top-left-radius: 4px; border-bottom-left-radius: 4px; }
-        #sortOptions a:last-child { border-top-right-radius: 4px; border-bottom-right-radius: 4px; }
-        #sortOptions a:hover { background-color: #eee; }
-        #sortOptions a.is-active { border-bottom-color: #3367d6; -webkit-box-shadow: inset 0 -1px 0 #3367d6; box-shadow: inset 0 -1px 0 #3367d6; }
-        #sortOptions a span { display: inline-block; }
+        #pathFilter input { min-width: 100px; font-size: 100%; display: inline-block; padding: 3px; border: 1px solid #d3d3d3; line-height: 1.3; border-radius: 4px; }
+        .option-group a { padding: 4px 8px; border: 1px solid #d3d3d3; border-radius: 0; color: #4a4a4a; display: inline-block; text-decoration: none; background-color: #fff; background-image: -webkit-linear-gradient(top,rgba(0,0,0,0),rgba(0,0,0,0.02)); background-image: linear-gradient(top,rgba(0,0,0,0),rgba(0,0,0,0.02)); margin-right: -5px; }
+        .option-group a:first-child { border-top-left-radius: 4px; border-bottom-left-radius: 4px; }
+        .option-group a:last-child { border-top-right-radius: 4px; border-bottom-right-radius: 4px; }
+        .option-group a:hover { background-color: #eee; }
+        .option-group a.is-active { border-bottom-color: #3367d6; -webkit-box-shadow: inset 0 -1px 0 #3367d6; box-shadow: inset 0 -1px 0 #3367d6; }
+        .option-group a span { display: inline-block; }
         .count-message { padding: 6px 0; color: #4a4a4a; }
         .errors-wrapper { padding-bottom: 1rem; }
-        .zero-state { padding: 3rem 0; }
+        .zero-state { padding: 3rem 0; text-align: center; background-color: #fdfc88; margin: 0; }
 
         .error-table { width: 100%; }
-        .error-table td { padding: 2px; border-bottom: 1px solid #d3d3d3; border-bottom-color: #d3d3d3 !important;}
-        .error-table th { padding: 2px; text-align: left; font-weight: normal; color: #333; border-bottom: 1px solid #d3d3d3; }
-        .error-table td.entry-type { border-left: 4px solid #000000; padding-left: 10px; }
+        .error-table td { padding: 8px 0; border-bottom: 1px solid #d3d3d3; border-bottom-color: #d3d3d3 !important;}
+        .error-table th { padding: 2px; text-align: left; font-weight: bold; color: #333; border-bottom: 1px solid #d3d3d3; font-size: 10px; text-transform: uppercase; }
+        .error-table td.entry-type { border-left: 5px solid #000000; padding-left: 10px; }
         .error-table td.r { text-align: right; padding-right: 10px; }
+        .entry-hd { cursor: pointer; }
+        .entry-hd:hover { background-color: #fbfc97; }
+        .entry-ft { display: none; }
+        .entry-ft-info { background-color: #ececec; }
+        .entry-data { padding: 0 12px; }
+        .entry-data .label { text-transform: uppercase; padding: 4px 0; color: #4a4a4a; font-size: 10px; font-weight: bold; }
+        .entry-data blockquote { font-size: 12px; margin: 2px 24px; }
         .hide { display: none; }
         .alternate { background-color: #f8f8f8; }
         .deprecated { border-color: #acacac !important; }
@@ -414,8 +430,8 @@ $host = (function_exists('gethostname')
                     <?php foreach ($types as $title => $class): ?>
                     <label class="<?php echo $class; ?>">
                         <input type="checkbox" value="<?php echo $class; ?>" checked="checked" /> <?php
-                            echo $title; ?> (<span data-total="<?php echo $typecount[$title]; ?>"><?php
-                            echo $typecount[$title]; ?></span>)
+                            echo $title; ?> (<span data-total="<?php echo $typecounts[$title]; ?>"><?php
+                            echo $typecounts[$title]; ?></span>)
                     </label>
                     <?php endforeach; ?>
                 </div>
@@ -424,16 +440,24 @@ $host = (function_exists('gethostname')
             <fieldset id="pathFilter">
                 <div class="label">Filter by path</div>
                 <div class="control">
-                    <input type="text" value="" placeholder="Just start typing..." />
+                    <input type="text" value="" placeholder="Just start typing..." autofocus />
                 </div>
             </fieldset>
 
-            <fieldset id="sortOptions">
+            <fieldset id="sortOptions" class="option-group">
                 <div class="label">Sort by</div>
                 <div class="control">
                     <a href="?type=last&amp;order=asc" class="is-active">last seen <span>↓</span></a>
                     <a href="?type=hits&amp;order=desc">hits <span> </span></a>
                     <a href="?type=type&amp;order=asc">type <span> </span></a>
+                </div>
+            </fieldset>
+
+            <fieldset class="option-group">
+                <div class="label">Format</div>
+                <div class="control">
+                    <a href="?format=table" class="<?php if ($format=='table') { echo "is-active"; } ?>">table</a>
+                    <a href="?format=list" class="<?php if ($format=='list') { echo "is-active"; } ?>">list</a>
                 </div>
             </fieldset>
         </div>
@@ -447,18 +471,24 @@ $host = (function_exists('gethostname')
     <section id="errorList">
     <?php if ($format == 'table') { ?>
         <div style="overflow-x:scroll;">
-        <table class="error-table" cellpadding="0" cellspacing="0">
+        <table class="error-table js-error-entries" cellpadding="0" cellspacing="0">
             <thead>
-                <tr><th>Type</th><th class="r">Hits</th><th>Error</th><th>Last Seen</th></tr>
+                <tr>
+                    <th style="width: 10%;">Type</th>
+                    <th style="width: 5%;" class="r">Hits</th>
+                    <th style="width: 75%;">Error</th>
+                    <th style="width: 10%;">Last Seen</th>
+                </tr>
             </thead>
-            <tbody class="js-error-entries">
             <?php foreach ($logs as $log) { ?>
-                <tr class="entry <?= $types[$log->type] ?>"
+                <?php $uid = uniqid('tbq'); ?>
+            <tbody class="entry <?= $types[$log->type] ?>"
                     data-path="<?php if (!empty($log->path)) echo htmlentities($log->path); ?>"
                     data-line="<?php if (!empty($log->line)) echo $log->line; ?>"
                     data-type="<?php echo $types[$log->type]; ?>"
                     data-hits="<?php echo $log->hits; ?>"
                     data-last="<?php echo $log->last; ?>">
+                <tr class="entry-hd" data-for="<?= $uid; ?>">
                     <td class="entry-type <?=$types[$log->type]?>"><?= htmlentities($log->type) ?></td>
                     <td class="r"><?= $log->hits ?></td>
                     <td><strong><?= htmlentities((empty($log->core) ? $log->msg : $log->core)); ?></strong><br />
@@ -468,8 +498,39 @@ $host = (function_exists('gethostname')
                     </td>
                     <td><?php echo date_format(date_create("@{$log->first}"), "Y-m-d H:i:s"); ?></td>
                 </tr>
-            <?php } // end foreach ?>
+                <?php if (!empty($log->trace)) { ?>
+                <tr class="entry-ft <?= $uid; ?>">
+                    <td></td>
+                    <td></td>
+                    <td colspan="2" class="entry-ft-info">
+                        <div class="entry-data">
+                            <span class="label">Stack trace</span>
+                            <blockquote><code><?= nl2br($log->trace); ?></code></blockquote>
+                        </div>
+                    </td>
+                </tr>
+                <?php } // endif; ?>
+                <?php if (!empty($log->code)) { ?>
+                <tr class="entry-ft <?= $uid; ?>">
+                    <td></td>
+                    <td></td>
+                    <td colspan="2" class="entry-ft-info">
+                        <div class="entry-data">
+                            <span class="label">Code snippet</span>
+                            <blockquote><?= highlight_string($log->code, true); ?></blockquote>
+                        </div>
+                    </td>
+                </tr>
+                <?php } // endif; ?>
             </tbody>
+            <?php } // end foreach ?>
+            <tfoot id="nothingToShow" class="hide">
+                <tr>
+                    <td colspan="4">
+                        <p class="zero-state">Nothing to show with your selected filtering.</p>
+                    </td>
+                </tr>
+            </tfoot>
         </table>
         </div>
     <?php } else { ?>
@@ -506,10 +567,12 @@ $host = (function_exists('gethostname')
         </article>
     <?php endforeach; ?>
         </div>
+        <div id="nothingToShow" class="hide">
+            <p class="zero-state">Nothing to show with your selected filtering.</p>
+        </div>
     <?php } //endif ?>
     </section>
 
-    <p id="nothingToShow" class="zero-state hide">Nothing to show with your selected filtering.</p>
 </div>
 </div>
 <?php else: ?>
@@ -618,8 +681,8 @@ $host = (function_exists('gethostname')
     }
 
     function sortEntries(type, order) {
-        var aList = $('#errorList').find('.entry');
-        aList.sort(function(a, b){
+        var entriesList = $('#errorList').find('.entry');
+        entriesList.sort(function(a, b) {
             if (!isNaN($(a).data(type))) {
                 var entryA = parseInt($(a).data(type));
                 var entryB = parseInt($(b).data(type));
@@ -630,9 +693,10 @@ $host = (function_exists('gethostname')
             if (order == 'asc') {
                 return (entryA < entryB) ? -1 : (entryA > entryB) ? 1 : 0;
             }
-            return  (entryB < entryA) ? -1 : (entryB > entryA) ? 1 : 0;
+            return (entryB < entryA) ? -1 : (entryB > entryA) ? 1 : 0;
         });
-        $('.js-error-entries').html(aList);
+        var sortedList = entriesList;
+        $('.js-error-entries').append(sortedList);
     }
 
     $(function(){
@@ -656,8 +720,12 @@ $host = (function_exists('gethostname')
             $('span', $(this)).text((qs.order == 'asc' ? '↑' : '↓'));
             return false;
         });
-        $(document).on('click', 'a.codeblock, a.traceblock', function(e){
+        $(document).on('click', 'a.codeblock, a.traceblock', function(e) {
             $('#' + $(this).data('for')).toggle();
+            return false;
+        });
+        $(document).on('click', '.entry-hd', function(e) {
+            $('.' + $(this).data('for')).toggle();
             return false;
         });
         stripe();
